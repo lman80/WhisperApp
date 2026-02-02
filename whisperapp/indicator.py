@@ -19,6 +19,7 @@ class RecordingIndicator:
         self.window = None
         self.view = None
         self.is_visible = False
+        self.is_processing = False  # True when showing loading state
         self.current_level = 0.0
         self._update_thread = None
         self._initialized = False
@@ -48,12 +49,14 @@ class RecordingIndicator:
             class PolishedIndicatorView(NSView):
                 level = objc.ivar('level', objc._C_FLT)
                 pulse_phase = objc.ivar('pulse_phase', objc._C_FLT)
+                is_processing = objc.ivar('is_processing', objc._C_BOOL)
                 
                 def initWithFrame_(self, frame):
                     self = objc.super(PolishedIndicatorView, self).initWithFrame_(frame)
                     if self:
                         self.level = 0.0
                         self.pulse_phase = 0.0
+                        self.is_processing = False
                     return self
                 
                 def drawRect_(self, rect):
@@ -90,34 +93,49 @@ class RecordingIndicator:
                     pill_path.setLineWidth_(1.5)
                     pill_path.stroke()
                     
-                    # Red recording dot (pulsing)
+                    # Red recording dot (pulsing) - or yellow when processing
                     dot_size = 10 + (self.level * 4) + (pulse * 2)
                     dot_x = 16
                     dot_y = h / 2
                     dot_rect = NSMakeRect(dot_x - dot_size/2, dot_y - dot_size/2, dot_size, dot_size)
                     
+                    if self.is_processing:
+                        # Yellow/orange for processing
+                        glow_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.7, 0.2, 0.4)
+                        dot_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.75, 0.25, 1.0)
+                        inner_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.85, 0.5, 0.6)
+                    else:
+                        # Red for recording
+                        glow_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.2, 0.2, 0.4)
+                        dot_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.25, 0.25, 1.0)
+                        inner_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.5, 0.5, 0.6)
+                    
                     # Dot glow
                     dot_glow_size = dot_size + 6
                     dot_glow_rect = NSMakeRect(dot_x - dot_glow_size/2, dot_y - dot_glow_size/2, dot_glow_size, dot_glow_size)
-                    dot_glow_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.2, 0.2, 0.4)
-                    dot_glow_color.set()
+                    glow_color.set()
                     NSBezierPath.bezierPathWithOvalInRect_(dot_glow_rect).fill()
                     
-                    # Main dot with gradient effect (simulated with layered circles)
-                    # Outer ring
-                    dot_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.25, 0.25, 1.0)
+                    # Main dot
                     dot_color.set()
                     NSBezierPath.bezierPathWithOvalInRect_(dot_rect).fill()
                     
                     # Inner highlight
                     inner_size = dot_size * 0.6
                     inner_rect = NSMakeRect(dot_x - inner_size/2 - 1, dot_y - inner_size/2 + 1, inner_size, inner_size)
-                    inner_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.5, 0.5, 0.6)
                     inner_color.set()
                     NSBezierPath.bezierPathWithOvalInRect_(inner_rect).fill()
                     
-                    # "REC" text
-                    text = "REC"
+                    # Text: "REC" when recording, "..." animated when processing
+                    if self.is_processing:
+                        # Animated dots based on phase
+                        import math
+                        num_dots = int((self.pulse_phase * 2) % 4)  # 0, 1, 2, or 3 dots
+                        text = "." * max(1, num_dots) if num_dots > 0 else "..."
+                        text = "..." if num_dots == 0 else "." * num_dots
+                    else:
+                        text = "REC"
+                    
                     font = NSFont.boldSystemFontOfSize_(11)
                     text_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 1.0, 1.0, 0.9)
                     
@@ -132,34 +150,56 @@ class RecordingIndicator:
                     text_y = (h - text_size.height) / 2
                     ns_text.drawAtPoint_withAttributes_((text_x, text_y), attrs)
                     
-                    # Audio level bars (5 bars for waveform effect)
-                    bar_x_start = 56
-                    bar_width = 3
-                    bar_spacing = 4
-                    bar_max_height = 16
-                    bar_y = h / 2
+                    # Show audio bars when recording, or spinning dots when processing
+                    content_x_start = 56
                     
-                    for i in range(5):
-                        # Different heights based on level with wave-like variation
+                    if self.is_processing:
+                        # Spinning dots animation
                         import math
-                        phase_offset = i * 0.7 + self.pulse_phase
-                        bar_level = self.level * (0.6 + 0.4 * math.sin(phase_offset * 4))
-                        bar_height = 3 + (bar_level * bar_max_height)
+                        num_dots = 3
+                        dot_radius = 3
+                        spacing = 8
                         
-                        bar_rect = NSMakeRect(
-                            bar_x_start + i * bar_spacing,
-                            bar_y - bar_height / 2,
-                            bar_width,
-                            bar_height
-                        )
+                        for i in range(num_dots):
+                            # Each dot pulses at different phase
+                            dot_phase = self.pulse_phase * 3 + i * (math.pi * 2 / num_dots)
+                            dot_alpha = 0.3 + 0.7 * (0.5 + 0.5 * math.sin(dot_phase))
+                            
+                            dx = content_x_start + i * spacing + dot_radius
+                            dy = h / 2
+                            
+                            dot_r = NSMakeRect(dx - dot_radius, dy - dot_radius, dot_radius * 2, dot_radius * 2)
+                            dc = NSColor.colorWithRed_green_blue_alpha_(1.0, 0.85, 0.4, dot_alpha)
+                            dc.set()
+                            NSBezierPath.bezierPathWithOvalInRect_(dot_r).fill()
+                    else:
+                        # Audio level bars (5 bars for waveform effect)
+                        bar_width = 3
+                        bar_spacing = 4
+                        bar_max_height = 16
+                        bar_y = h / 2
                         
-                        # Bar color (white with level-based opacity)
-                        bar_alpha = 0.4 + bar_level * 0.6
-                        bar_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 1.0, 1.0, bar_alpha)
-                        bar_color.set()
-                        
-                        bar_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bar_rect, 1.5, 1.5)
-                        bar_path.fill()
+                        for i in range(5):
+                            # Different heights based on level with wave-like variation
+                            import math
+                            phase_offset = i * 0.7 + self.pulse_phase * 4
+                            bar_level = self.level * (0.6 + 0.4 * math.sin(phase_offset))
+                            bar_height = 3 + (bar_level * bar_max_height)
+                            
+                            bar_rect = NSMakeRect(
+                                content_x_start + i * bar_spacing,
+                                bar_y - bar_height / 2,
+                                bar_width,
+                                bar_height
+                            )
+                            
+                            # Bar color (white with level-based opacity)
+                            bar_alpha = 0.4 + bar_level * 0.6
+                            bar_color = NSColor.colorWithRed_green_blue_alpha_(1.0, 1.0, 1.0, bar_alpha)
+                            bar_color.set()
+                            
+                            bar_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bar_rect, 1.5, 1.5)
+                            bar_path.fill()
             
             # Position at bottom center of screen
             screen = NSScreen.mainScreen()
@@ -273,3 +313,11 @@ def hide_indicator():
 def update_indicator_level(level: float):
     """Update the audio level on the indicator."""
     get_indicator().update_level(level)
+
+
+def set_processing_mode(processing: bool):
+    """Set the indicator to processing mode (yellow spinner instead of red bars)."""
+    indicator = get_indicator()
+    indicator.is_processing = processing
+    if indicator.view:
+        indicator.view.is_processing = processing

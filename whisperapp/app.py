@@ -250,9 +250,10 @@ class WhisperApp(rumps.App):
         self.is_processing = True
         self._update_status("Processing...", "⏳")
         
-        # Play stop sound and hide indicator
+        # Play stop sound and switch indicator to processing mode (yellow spinner)
         play_stop_sound()
-        hide_indicator()
+        from .indicator import set_processing_mode
+        set_processing_mode(True)
         
         try:
             # Stop recording and get audio file
@@ -300,6 +301,10 @@ class WhisperApp(rumps.App):
             log.info(f"✓ Complete! Typed {word_count} words")
             self._update_status(f"Typed {word_count} words", "✓")
             
+            # Hide indicator now that we're done
+            hide_indicator()
+            set_processing_mode(False)
+            
             # Reset status after a delay
             threading.Timer(2.0, lambda: self._update_status("Ready", "🎤")).start()
             
@@ -320,30 +325,8 @@ class WhisperApp(rumps.App):
     @rumps.clicked("History")
     def show_history(self, _):
         """Show the transcription history window."""
-        history = self.db.get_transcriptions(limit=20)
-        
-        if not history:
-            rumps.alert(
-                title="Transcription History",
-                message="No transcriptions yet!\n\nHold Right ⌘ and speak to transcribe.",
-                ok="OK"
-            )
-            return
-        
-        # Format history for display
-        lines = []
-        for item in history:
-            text_preview = item['text'][:60] + "..." if len(item['text']) > 60 else item['text']
-            timestamp = item['created_at'][:16].replace('T', ' ')
-            lines.append(f"[{timestamp}] {text_preview}")
-        
-        history_text = "\n".join(lines)
-        
-        rumps.alert(
-            title="Transcription History (Recent 20)",
-            message=history_text,
-            ok="OK"
-        )
+        from .history_window import show_history_window
+        show_history_window(self.db)
     
     @rumps.clicked("Statistics")
     def show_statistics(self, _):
