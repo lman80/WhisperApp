@@ -293,6 +293,8 @@ class WhisperApp(rumps.App):
             if not raw_text:
                 log.warning("No speech detected in audio")
                 self._update_status("No speech detected", "🎤")
+                hide_indicator()
+                set_processing_mode(False)
                 self.is_processing = False
                 return
             
