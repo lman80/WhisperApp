@@ -279,21 +279,49 @@ class WhisperApp(rumps.App):
     def _on_recording_stop(self):
         """Called when the push-to-talk key is released."""
         log.info("⏹️ Hotkey RELEASED - stopping recording")
+        
         if not self.is_recording:
             log.warning("Not recording, ignoring key release")
             return
         
         self.is_recording = False
         self.is_processing = True
-        self._update_status("Processing...", "⏳")
         
-        # Play stop sound and switch indicator to processing mode (yellow spinner)
-        play_stop_sound()
-        from .indicator import set_processing_mode
-        set_processing_mode(True)
+        # Start a failsafe timer to ensure we never stay stuck
+        def failsafe_cleanup():
+            if self.is_processing:
+                log.warning("Failsafe triggered - forcing cleanup after 30s")
+                try:
+                    hide_indicator()
+                    set_processing_mode(False)
+                except:
+                    pass
+                self.is_processing = False
+                self._update_status("Timeout - Ready", "🎤")
+        
+        failsafe_timer = threading.Timer(30.0, failsafe_cleanup)
+        failsafe_timer.daemon = True
+        failsafe_timer.start()
         
         try:
+            # Update status
+            self._update_status("Processing...", "⏳")
+            
+            # Play stop sound (wrapped in try to prevent blocking)
+            try:
+                play_stop_sound()
+            except Exception as e:
+                log.warning(f"Could not play stop sound: {e}")
+            
+            # Switch indicator to processing mode
+            try:
+                from .indicator import set_processing_mode
+                set_processing_mode(True)
+            except Exception as e:
+                log.warning(f"Could not set processing mode: {e}")
+            
             # Stop recording and get audio file
+            log.debug("Stopping recorder...")
             wav_path = self.recorder.stop()
             duration = self.recorder.last_duration
             log.info(f"Recorded {duration:.2f}s to {wav_path}")
@@ -311,7 +339,7 @@ class WhisperApp(rumps.App):
                 self._update_status("No speech detected", "🎤")
                 hide_indicator()
                 set_processing_mode(False)
-                self.is_processing = False
+                failsafe_timer.cancel()
                 return
             
             # Clean up transcription if enabled
@@ -326,8 +354,10 @@ class WhisperApp(rumps.App):
             # Save to history
             self.db.save_transcription(
                 text=cleaned_text,
-                raw_text=raw_text if raw_text != cleaned_text else None,
-                duration=duration
+                raw_text=raw_text,
+                duration=duration,
+                model=self.current_model,
+                cleanup_used=self.cleanup_enabled
             )
             log.debug("Saved to database")
             
@@ -359,9 +389,13 @@ class WhisperApp(rumps.App):
         except Exception as e:
             log.error(f"Error processing recording: {e}", exc_info=True)
             self._update_status(f"Error: {str(e)[:20]}", "⚠️")
-            hide_indicator()
-            set_processing_mode(False)
+            try:
+                hide_indicator()
+                set_processing_mode(False)
+            except:
+                pass
         finally:
+            failsafe_timer.cancel()
             self.is_processing = False
     
     def _on_double_tap(self):
