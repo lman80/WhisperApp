@@ -54,3 +54,71 @@ whisperapp/
 └── assets/
     └── drop.mp3
 ```
+
+---
+
+## 2026-02-01: Python Lazy Import Performance Impact
+
+**Learning**: Imports inside functions ("lazy imports") can cause significant first-call delays.
+
+**Example**: scipy takes ~30 seconds to import. If imported inside `stop()`:
+```python
+def stop(self):
+    from scipy.io import wavfile  # 30 second delay on FIRST call only
+```
+
+**Best practice**: Import heavy libraries at module level so the cost is paid at startup, not during user actions:
+```python
+from scipy.io import wavfile  # Import once at module load
+```
+
+**Trade-off**: Slower app startup, but consistent response time during use.
+
+---
+
+## 2026-02-01: Thread Safety Pattern for Hotkey Callbacks
+
+**Learning**: Hotkey/keyboard callbacks fire on background threads - always assume concurrent access.
+
+**Pattern**:
+```python
+self._recording_lock = threading.Lock()
+self._last_action_time = 0
+
+def _on_hotkey(self):
+    # Debounce rapid events
+    now = time.time()
+    if now - self._last_action_time < 0.1:
+        return
+    self._last_action_time = now
+    
+    # Serialize access to shared state
+    with self._recording_lock:
+        if self.is_processing:
+            return
+        # ... do work
+```
+
+---
+
+## 2026-02-01: Resource Cleanup Pattern for Audio Streams
+
+**Learning**: Audio hardware resources (streams, devices) must be explicitly closed or they leak.
+
+**Pattern for streams**:
+```python
+def start(self):
+    # Always clean up before creating new
+    if self.stream:
+        try:
+            self.stream.stop()
+            self.stream.close()
+        except:
+            pass
+        self.stream = None
+    
+    # Now create new
+    self.stream = sd.InputStream(...)
+```
+
+**Key insight**: Wrap cleanup in try/except - a stream in error state shouldn't prevent new stream creation.
