@@ -8,6 +8,148 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _preferences_window = None
+_preferences_delegate = None  # Keep delegate alive to prevent GC
+
+
+def _create_preferences_delegate_class():
+    """Create the PyObjC delegate class for handling UI actions."""
+    from AppKit import NSObject
+    import objc
+    
+    class PreferencesDelegate(NSObject):
+        """Delegate to handle button and popup actions properly via PyObjC."""
+        
+        def initWithPreferencesWindow_app_(self, prefs_window, app_instance):
+            self = objc.super(PreferencesDelegate, self).init()
+            if self is None:
+                return None
+            self.prefs_window = prefs_window
+            self.app = app_instance
+            return self
+        
+        @objc.python_method
+        def set_model_popup(self, popup):
+            """Store reference to model popup for action handler."""
+            self._model_popup = popup
+        
+        @objc.python_method  
+        def set_hotkey_button(self, button):
+            """Store reference to hotkey button for action handler."""
+            self._hotkey_button = button
+        
+        def recordHotkey_(self, sender):
+            """Handle Record Hotkey button click."""
+            log.info("Record hotkey button clicked")
+            if not self.prefs_window.is_recording_hotkey:
+                self.prefs_window.is_recording_hotkey = True
+                sender.setTitle_("Press a key...")
+                
+                # Store sender reference for callback
+                button = sender
+                prefs = self.prefs_window
+                
+                def on_key_recorded(key_name):
+                    from .hotkey import HotkeyManager
+                    display = HotkeyManager.KEY_DISPLAY.get(key_name, key_name)
+                    button.setTitle_(display)
+                    prefs.is_recording_hotkey = False
+                    log.info(f"Hotkey recorded: {key_name} -> {display}")
+                
+                if self.app.hotkey_manager:
+                    self.app.hotkey_manager.start_hotkey_recording(on_key_recorded)
+        
+        def modelChanged_(self, sender):
+            """Handle model popup selection change."""
+            from .models import AVAILABLE_MODELS, is_model_downloaded, download_model
+            import threading
+            
+            selected_title = sender.titleOfSelectedItem()
+            log.info(f"Model selection changed: {selected_title}")
+            
+            # Extract model key from selected title
+            # Format is "✓ Model Name" or "↓ Model Name"
+            model_name = selected_title[2:] if selected_title[:2] in ("✓ ", "↓ ") else selected_title
+            
+            # Find matching model key
+            model_key = None
+            for key, info in AVAILABLE_MODELS.items():
+                if info.name == model_name:
+                    model_key = key
+                    break
+            
+            if not model_key:
+                log.warning(f"Could not find model key for: {model_name}")
+                return
+            
+            if model_key == self.app.current_model:
+                log.debug("Same model selected, no change needed")
+                return
+            
+            model_info = AVAILABLE_MODELS[model_key]
+            
+            # Check if downloaded
+            if not is_model_downloaded(model_key):
+                # Show download prompt
+                from AppKit import NSAlert, NSAlertFirstButtonReturn
+                
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_(f"Download {model_info.name}?")
+                alert.setInformativeText_(f"Size: {model_info.size}\n\nThis will download the model for offline use.")
+                alert.addButtonWithTitle_("Download")
+                alert.addButtonWithTitle_("Cancel")
+                
+                response = alert.runModal()
+                
+                if response != NSAlertFirstButtonReturn:
+                    # User cancelled - revert popup to current model
+                    current_info = AVAILABLE_MODELS.get(self.app.current_model)
+                    if current_info:
+                        downloaded = is_model_downloaded(self.app.current_model)
+                        prefix = "✓ " if downloaded else "↓ "
+                        sender.selectItemWithTitle_(f"{prefix}{current_info.name}")
+                    return
+                
+                # Download in background
+                log.info(f"Starting download of {model_info.name}")
+                app = self.app
+                popup = sender
+                
+                def do_download():
+                    success = download_model(model_key)
+                    if success:
+                        app.current_model = model_key
+                        # Update popup to show downloaded status
+                        popup.selectItemWithTitle_(f"✓ {model_info.name}")
+                        # Update the menu item title too
+                        for i in range(popup.numberOfItems()):
+                            item_title = popup.itemTitleAtIndex_(i)
+                            if model_info.name in item_title:
+                                popup.itemAtIndex_(i).setTitle_(f"✓ {model_info.name}")
+                                break
+                        log.info(f"✓ Switched to model: {model_info.name}")
+                    else:
+                        log.error(f"Failed to download {model_info.name}")
+                        # Revert selection
+                        current_info = AVAILABLE_MODELS.get(app.current_model)
+                        if current_info:
+                            downloaded = is_model_downloaded(app.current_model)
+                            prefix = "✓ " if downloaded else "↓ "
+                            popup.selectItemWithTitle_(f"{prefix}{current_info.name}")
+                
+                threading.Thread(target=do_download, daemon=True).start()
+            else:
+                # Already downloaded, just switch
+                self.app.current_model = model_key
+                log.info(f"✓ Switched to model: {model_info.name}")
+        
+        def toggleCleanup_(self, sender):
+            """Handle AI Formatting toggle."""
+            from AppKit import NSOnState
+            self.app.cleanup_enabled = (sender.state() == NSOnState)
+            status = "ON" if self.app.cleanup_enabled else "OFF"
+            log.info(f"AI Formatting toggled: {status}")
+    
+    return PreferencesDelegate
 
 
 class PreferencesWindow:
@@ -17,7 +159,9 @@ class PreferencesWindow:
         self.app = app_instance
         self.window = None
         self.hotkey_button = None
+        self.model_popup = None
         self.is_recording_hotkey = False
+        self.delegate = None
     
     def show(self):
         """Show the preferences window."""
@@ -30,6 +174,8 @@ class PreferencesWindow:
     
     def _create_window(self):
         """Create the native preferences window with modern styling."""
+        global _preferences_delegate
+        
         from AppKit import (
             NSWindow, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
             NSWindowStyleMaskFullSizeContentView, NSBackingStoreBuffered,
@@ -41,6 +187,11 @@ class PreferencesWindow:
             NSBezelStyleRounded
         )
         import objc
+        
+        # Create delegate for button/popup actions
+        PreferencesDelegate = _create_preferences_delegate_class()
+        self.delegate = PreferencesDelegate.alloc().initWithPreferencesWindow_app_(self, self.app)
+        _preferences_delegate = self.delegate  # Prevent garbage collection
         
         # Window dimensions
         win_width = 400
@@ -138,17 +289,22 @@ class PreferencesWindow:
         
         from .models import AVAILABLE_MODELS, is_model_downloaded
         
-        model_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(80, model_card_height - 40, card_width - 100, 26))
-        model_popup.removeAllItems()
+        self.model_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(80, model_card_height - 40, card_width - 100, 26))
+        self.model_popup.removeAllItems()
         
         for key, info in AVAILABLE_MODELS.items():
             downloaded = is_model_downloaded(key)
             prefix = "✓ " if downloaded else "↓ "
-            model_popup.addItemWithTitle_(f"{prefix}{info.name}")
+            self.model_popup.addItemWithTitle_(f"{prefix}{info.name}")
             if key == self.app.current_model:
-                model_popup.selectItemWithTitle_(f"{prefix}{info.name}")
+                self.model_popup.selectItemWithTitle_(f"{prefix}{info.name}")
         
-        model_card.addSubview_(model_popup)
+        # Wire up model popup action
+        self.model_popup.setTarget_(self.delegate)
+        self.model_popup.setAction_(objc.selector(self.delegate.modelChanged_, signature=b'v@:@'))
+        self.delegate.set_model_popup(self.model_popup)
+        
+        model_card.addSubview_(self.model_popup)
         vibrancy_view.addSubview_(model_card)
         
         y_pos -= model_card_height + 10
@@ -176,21 +332,11 @@ class PreferencesWindow:
         self.hotkey_button.setTitle_(current_display)
         self.hotkey_button.setBezelStyle_(NSBezelStyleRounded)
         
-        def on_record_hotkey(sender):
-            if not self.is_recording_hotkey:
-                self.is_recording_hotkey = True
-                sender.setTitle_("Press a key...")
-                
-                def on_key_recorded(key_name):
-                    display = HotkeyManager.KEY_DISPLAY.get(key_name, key_name)
-                    sender.setTitle_(display)
-                    self.is_recording_hotkey = False
-                
-                if self.app.hotkey_manager:
-                    self.app.hotkey_manager.start_hotkey_recording(on_key_recorded)
+        # Wire up hotkey button action properly via delegate
+        self.hotkey_button.setTarget_(self.delegate)
+        self.hotkey_button.setAction_(objc.selector(self.delegate.recordHotkey_, signature=b'v@:@'))
+        self.delegate.set_hotkey_button(self.hotkey_button)
         
-        self.hotkey_button.setTarget_(self.hotkey_button)
-        self.hotkey_button.setAction_(objc.selector(on_record_hotkey, signature=b'v@:@'))
         hotkey_card.addSubview_(self.hotkey_button)
         vibrancy_view.addSubview_(hotkey_card)
         
@@ -209,17 +355,27 @@ class PreferencesWindow:
         format_label.setEditable_(False)
         format_card.addSubview_(format_label)
         
-        cleanup_btn = NSButton.alloc().initWithFrame_(NSMakeRect(card_width - 60, format_card_height - 40, 50, 26))
-        cleanup_btn.setButtonType_(13)  # Switch style
-        cleanup_btn.setTitle_("")
-        cleanup_btn.setState_(NSOnState if self.app.cleanup_enabled else NSOffState)
+        # Use NSSwitch for proper macOS toggle appearance (available 10.15+)
+        try:
+            from AppKit import NSSwitch
+            cleanup_switch = NSSwitch.alloc().initWithFrame_(NSMakeRect(card_width - 60, format_card_height - 40, 50, 26))
+            cleanup_switch.setState_(NSOnState if self.app.cleanup_enabled else NSOffState)
+            
+            # Wire up cleanup toggle via delegate
+            cleanup_switch.setTarget_(self.delegate)
+            cleanup_switch.setAction_(objc.selector(self.delegate.toggleCleanup_, signature=b'v@:@'))
+            
+            format_card.addSubview_(cleanup_switch)
+        except ImportError:
+            # Fallback for older macOS - use checkbox with ON/OFF text
+            cleanup_btn = NSButton.alloc().initWithFrame_(NSMakeRect(card_width - 60, format_card_height - 40, 50, 26))
+            cleanup_btn.setButtonType_(3)  # NSButtonTypeSwitch (checkbox)
+            cleanup_btn.setTitle_("ON" if self.app.cleanup_enabled else "OFF")
+            cleanup_btn.setState_(NSOnState if self.app.cleanup_enabled else NSOffState)
+            cleanup_btn.setTarget_(self.delegate)
+            cleanup_btn.setAction_(objc.selector(self.delegate.toggleCleanup_, signature=b'v@:@'))
+            format_card.addSubview_(cleanup_btn)
         
-        def toggle_cleanup(sender):
-            self.app.cleanup_enabled = (sender.state() == NSOnState)
-        
-        cleanup_btn.setTarget_(cleanup_btn)
-        cleanup_btn.setAction_(objc.selector(toggle_cleanup, signature=b'v@:@'))
-        format_card.addSubview_(cleanup_btn)
         vibrancy_view.addSubview_(format_card)
         
         y_pos -= format_card_height + 10
