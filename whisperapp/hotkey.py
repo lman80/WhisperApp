@@ -22,9 +22,9 @@ class HotkeyManager:
     Manages global hotkey detection and text injection.
     
     Features:
-    - Hold trigger key to record
+    - Hold trigger key to record (press starts, release stops)
     - Double-tap to paste last transcription
-    - Triple-tap to undo (select all + delete)
+    - Triple-tap to undo
     - Record custom hotkey
     """
     
@@ -69,8 +69,8 @@ class HotkeyManager:
         Initialize the hotkey manager.
         
         Args:
-            on_start: Callback when key is pressed (start recording)
-            on_stop: Callback when key is released after holding (stop recording)
+            on_start: Callback when recording should start
+            on_stop: Callback when recording should stop and process
             on_cancel: Callback when recording should be cancelled (quick tap)
             on_double_tap: Callback for double-tap (paste last transcription)
             on_triple_tap: Callback for triple-tap (undo)
@@ -91,9 +91,9 @@ class HotkeyManager:
         # Tap detection
         self.tap_times = []
         self.tap_threshold = 0.35  # Max time between taps (seconds)
-        self.hold_threshold = 0.25  # Min hold time for recording (seconds)
+        self.hold_threshold = 0.20  # Min hold time for recording (seconds)
         self.press_start_time = 0
-        self.recording_started = False
+        self.recording_active = False  # Track if we actually started recording
         
         # Last transcription for double-tap paste
         self.last_transcription = ""
@@ -182,12 +182,13 @@ class HotkeyManager:
             if key == self.trigger_key and not self.is_pressed:
                 self.is_pressed = True
                 self.press_start_time = time.time()
-                self.recording_started = False
+                self.recording_active = False
                 
-                # Start recording immediately
+                # Start recording immediately on press
                 if self.on_start:
-                    self.recording_started = True
+                    self.recording_active = True
                     threading.Thread(target=self.on_start, daemon=True).start()
+                    
         except Exception as e:
             log.error(f"Error in key press handler: {e}")
     
@@ -203,23 +204,27 @@ class HotkeyManager:
                 press_duration = time.time() - self.press_start_time
                 current_time = time.time()
                 
+                log.debug(f"Key released, duration: {press_duration:.3f}s, recording_active: {self.recording_active}")
+                
                 # Was this a hold (for recording) or a tap?
                 if press_duration >= self.hold_threshold:
-                    # This was a hold - trigger recording stop
+                    # This was a hold - stop recording and process
+                    log.debug("Hold detected - calling on_stop")
                     self.tap_times = []  # Reset tap counter
-                    if self.on_stop:
+                    if self.recording_active and self.on_stop:
+                        self.recording_active = False
                         threading.Thread(target=self.on_stop, daemon=True).start()
                 else:
-                    # This was a quick tap
-                    # First, always cancel any recording that started
-                    if self.recording_started and self.on_cancel:
-                        self.on_cancel()  # Call synchronously to ensure state is clean
-                    self.recording_started = False
+                    # This was a quick tap - cancel any recording, then check for gestures
+                    log.debug("Quick tap detected - cancelling")
+                    if self.recording_active and self.on_cancel:
+                        self.recording_active = False
+                        threading.Thread(target=self.on_cancel, daemon=True).start()
                     
                     # Track tap for double/triple detection
                     self.tap_times.append(current_time)
                     
-                    # Filter out old taps
+                    # Filter out old taps  
                     self.tap_times = [t for t in self.tap_times if current_time - t < self.tap_threshold * 3]
                     
                     # Get recent taps count
@@ -234,11 +239,10 @@ class HotkeyManager:
                             threading.Thread(target=self.on_triple_tap, daemon=True).start()
                     elif tap_count == 2:
                         # Might be double tap - wait to see if a third tap is coming
-                        tap_id = len(self.tap_times)  # Track which tap we're waiting on
+                        tap_id = len(self.tap_times)
                         
                         def check_double_tap():
                             time.sleep(self.tap_threshold + 0.05)
-                            # Only trigger if no new taps have been added
                             if len(self.tap_times) == tap_id:
                                 log.info("Double tap detected - paste last")
                                 self.tap_times = []
@@ -246,7 +250,6 @@ class HotkeyManager:
                                     self.on_double_tap()
                         
                         threading.Thread(target=check_double_tap, daemon=True).start()
-                    # Single tap does nothing extra, recording was already cancelled
                         
         except Exception as e:
             log.error(f"Error in key release handler: {e}")
@@ -278,12 +281,6 @@ class HotkeyManager:
     def inject_text(self, text: str) -> bool:
         """
         Inject text into the active application via clipboard + Cmd+V.
-        
-        Args:
-            text: Text to paste into the active application
-            
-        Returns:
-            True if successful, False otherwise
         """
         if not text:
             return False
