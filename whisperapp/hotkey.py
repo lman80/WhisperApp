@@ -150,6 +150,10 @@ class HotkeyManager:
                 self.is_pressed = True
                 self.press_start_time = time.time()
                 self.was_held = False
+                
+                # Start recording immediately
+                if self.on_start:
+                    threading.Thread(target=self.on_start, daemon=True).start()
         except Exception as e:
             log.error(f"Error in key press handler: {e}")
     
@@ -169,7 +173,8 @@ class HotkeyManager:
                     if self.on_stop:
                         threading.Thread(target=self.on_stop, daemon=True).start()
                 else:
-                    # This was a quick tap
+                    # This was a quick tap - cancel the recording that just started
+                    # We need to track this as a tap for double/triple tap detection
                     self.tap_times.append(current_time)
                     
                     # Filter out old taps
