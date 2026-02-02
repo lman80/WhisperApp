@@ -210,9 +210,10 @@ class HotkeyManager:
                     if self.on_stop:
                         threading.Thread(target=self.on_stop, daemon=True).start()
                 else:
-                    # This was a quick tap - cancel the recording that started
+                    # This was a quick tap
+                    # First, always cancel any recording that started
                     if self.recording_started and self.on_cancel:
-                        threading.Thread(target=self.on_cancel, daemon=True).start()
+                        self.on_cancel()  # Call synchronously to ensure state is clean
                     self.recording_started = False
                     
                     # Track tap for double/triple detection
@@ -221,24 +222,31 @@ class HotkeyManager:
                     # Filter out old taps
                     self.tap_times = [t for t in self.tap_times if current_time - t < self.tap_threshold * 3]
                     
-                    # Check for triple tap first
+                    # Get recent taps count
                     recent_taps = [t for t in self.tap_times if current_time - t < self.tap_threshold * 2.5]
+                    tap_count = len(recent_taps)
                     
-                    if len(recent_taps) >= 3:
+                    if tap_count >= 3:
+                        # Triple tap - immediate action
                         log.info("Triple tap detected - undo")
                         self.tap_times = []
                         if self.on_triple_tap:
                             threading.Thread(target=self.on_triple_tap, daemon=True).start()
-                    elif len(recent_taps) >= 2:
-                        # Wait briefly to see if a third tap is coming
+                    elif tap_count == 2:
+                        # Might be double tap - wait to see if a third tap is coming
+                        tap_id = len(self.tap_times)  # Track which tap we're waiting on
+                        
                         def check_double_tap():
-                            time.sleep(self.tap_threshold)
-                            if len(self.tap_times) == 2:  # Still only 2 taps
+                            time.sleep(self.tap_threshold + 0.05)
+                            # Only trigger if no new taps have been added
+                            if len(self.tap_times) == tap_id:
                                 log.info("Double tap detected - paste last")
                                 self.tap_times = []
                                 if self.on_double_tap:
                                     self.on_double_tap()
+                        
                         threading.Thread(target=check_double_tap, daemon=True).start()
+                    # Single tap does nothing extra, recording was already cancelled
                         
         except Exception as e:
             log.error(f"Error in key release handler: {e}")
