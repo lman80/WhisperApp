@@ -337,25 +337,10 @@ class WhisperApp(rumps.App):
     
     @rumps.clicked("Statistics")
     def show_statistics(self, _):
-        """Show usage statistics."""
+        """Show the statistics window."""
+        from .statistics_window import show_statistics_window
         stats = self.db.get_statistics()
-        
-        message = f"""📊 Usage Statistics
-
-Total Transcriptions: {stats['total_transcriptions']:,}
-Total Words Typed: {stats['total_words']:,}
-Total Recording Time: {stats['total_minutes']:.1f} min
-Average Speaking Speed: {stats['avg_wpm']:.0f} WPM
-
-📅 Today
-Transcriptions: {stats['today_count']}
-Words Typed: {stats['today_words']:,}"""
-        
-        rumps.alert(
-            title="WhisperApp Statistics",
-            message=message,
-            ok="OK"
-        )
+        show_statistics_window(stats)
     
     @rumps.clicked("Settings")
     def show_settings(self, _):
