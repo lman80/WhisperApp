@@ -64,6 +64,8 @@ class WhisperApp(rumps.App):
         self.is_recording = False
         self.is_processing = False
         self.current_model = "parakeet"  # Default model
+        self._recording_lock = threading.Lock()
+        self._last_action_time = 0
         
         # Build menu
         self._build_menu()
@@ -226,39 +228,53 @@ class WhisperApp(rumps.App):
     def _on_recording_start(self):
         """Called when the push-to-talk key is pressed."""
         log.info("▶️ Hotkey PRESSED - starting recording")
-        if self.is_processing:
-            log.warning("Still processing previous recording, ignoring")
+        
+        # Debounce rapid presses (min 100ms between actions)
+        import time as time_module
+        now = time_module.time()
+        if now - self._last_action_time < 0.1:
+            log.debug("Debounced - too fast")
             return
+        self._last_action_time = now
         
-        self.is_recording = True
-        self._update_status("Recording...", "🔴")
-        
-        # Play start sound and show indicator
-        play_start_sound()
-        show_indicator()
-        
-        try:
-            # Wire up level callback for visual indicator
-            self.recorder.level_callback = update_indicator_level
-            self.recorder.start()
-            log.debug("Recording started successfully")
-        except Exception as e:
-            log.error(f"Error starting recording: {e}")
-            self._update_status("Microphone error", "⚠️")
-            self.is_recording = False
-            hide_indicator()
+        with self._recording_lock:
+            if self.is_processing:
+                log.warning("Still processing previous recording, ignoring")
+                return
+            if self.is_recording:
+                log.warning("Already recording, ignoring")
+                return
+            
+            self.is_recording = True
+            self._update_status("Recording...", "🔴")
+            
+            # Play start sound and show indicator
+            play_start_sound()
+            show_indicator()
+            
+            try:
+                # Wire up level callback for visual indicator
+                self.recorder.level_callback = update_indicator_level
+                self.recorder.start()
+                log.debug("Recording started successfully")
+            except Exception as e:
+                log.error(f"Error starting recording: {e}")
+                self._update_status("Microphone error", "⚠️")
+                self.is_recording = False
+                hide_indicator()
     
     def _on_recording_cancel(self):
         """Called when a quick tap is detected - cancel the recording."""
         log.info("❌ Quick tap detected - cancelling recording")
-        if self.is_recording:
-            try:
-                self.recorder.stop()
-            except:
-                pass
-            self.is_recording = False
-            hide_indicator()
-            self._update_status("Ready", "🎤")
+        with self._recording_lock:
+            if self.is_recording:
+                try:
+                    self.recorder.stop()
+                except:
+                    pass
+                self.is_recording = False
+                hide_indicator()
+                self._update_status("Ready", "🎤")
     
     def _on_recording_stop(self):
         """Called when the push-to-talk key is released."""
