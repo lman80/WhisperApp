@@ -40,8 +40,8 @@ class PreferencesWindow:
         import objc
         
         # Window dimensions
-        win_width = 420
-        win_height = 400
+        win_width = 400
+        win_height = 480
         
         # Center on screen
         screen = NSScreen.mainScreen()
@@ -74,29 +74,26 @@ class PreferencesWindow:
         vibrancy_view.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
         vibrancy_view.setState_(NSVisualEffectStateActive)
         
-        y_pos = win_height - 50
+        y_pos = win_height - 45
         
         # === App Header with Icon ===
         assets_dir = Path(__file__).parent / "assets"
         icon_path = assets_dir / "AppIcon.png"
         
-        # Center header section
-        header_x = (win_width - 200) / 2
-        
         if icon_path.exists():
             image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
             if image:
-                image.setSize_((72, 72))
-                image_view = NSImageView.alloc().initWithFrame_(NSMakeRect((win_width - 72) / 2, y_pos - 30, 72, 72))
+                image.setSize_((56, 56))
+                image_view = NSImageView.alloc().initWithFrame_(NSMakeRect((win_width - 56) / 2, y_pos - 20, 56, 56))
                 image_view.setImage_(image)
                 vibrancy_view.addSubview_(image_view)
         
-        y_pos -= 95
+        y_pos -= 70
         
         # App name - centered
-        title_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_pos, win_width, 28))
+        title_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_pos, win_width, 24))
         title_label.setStringValue_("WhisperApp")
-        title_label.setFont_(NSFont.boldSystemFontOfSize_(22))
+        title_label.setFont_(NSFont.boldSystemFontOfSize_(18))
         title_label.setTextColor_(NSColor.labelColor())
         title_label.setBezeled_(False)
         title_label.setDrawsBackground_(False)
@@ -104,51 +101,41 @@ class PreferencesWindow:
         title_label.setAlignment_(1)  # Center
         vibrancy_view.addSubview_(title_label)
         
-        y_pos -= 22
+        y_pos -= 18
         
         # Version - centered
-        version_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_pos, win_width, 18))
+        version_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_pos, win_width, 16))
         version_label.setStringValue_("Version 1.0.0")
-        version_label.setFont_(NSFont.systemFontOfSize_(12))
-        version_label.setTextColor_(NSColor.secondaryLabelColor())
+        version_label.setFont_(NSFont.systemFontOfSize_(11))
+        version_label.setTextColor_(NSColor.tertiaryLabelColor())
         version_label.setBezeled_(False)
         version_label.setDrawsBackground_(False)
         version_label.setEditable_(False)
         version_label.setAlignment_(1)  # Center
         vibrancy_view.addSubview_(version_label)
         
-        y_pos -= 35
+        y_pos -= 25
         
-        # === Settings Card ===
-        card_margin = 20
+        # === Settings Cards ===
+        card_margin = 16
         card_width = win_width - (card_margin * 2)
-        card_height = 160
         
-        card = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(card_margin, y_pos - card_height + 20, card_width, card_height))
-        card.setMaterial_(3)
-        card.setBlendingMode_(0)
-        card.setState_(NSVisualEffectStateActive)
-        card.setWantsLayer_(True)
-        card.layer().setCornerRadius_(12)
-        card.layer().setMasksToBounds_(True)
-        card.layer().setBorderWidth_(0.5)
-        card.layer().setBorderColor_(NSColor.separatorColor().CGColor())
+        # --- Model Card ---
+        model_card_height = 58
+        model_card = self._create_card(card_margin, y_pos - model_card_height, card_width, model_card_height)
         
-        inner_y = card_height - 35
-        
-        # Model selection row
-        model_label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, inner_y, 80, 20))
+        model_label = NSTextField.alloc().initWithFrame_(NSMakeRect(14, model_card_height - 38, 60, 18))
         model_label.setStringValue_("Model")
         model_label.setFont_(NSFont.systemFontOfSize_(13))
         model_label.setTextColor_(NSColor.labelColor())
         model_label.setBezeled_(False)
         model_label.setDrawsBackground_(False)
         model_label.setEditable_(False)
-        card.addSubview_(model_label)
+        model_card.addSubview_(model_label)
         
         from .models import AVAILABLE_MODELS, is_model_downloaded
         
-        model_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(100, inner_y - 3, card_width - 120, 26))
+        model_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(80, model_card_height - 40, card_width - 100, 26))
         model_popup.removeAllItems()
         
         for key, info in AVAILABLE_MODELS.items():
@@ -158,28 +145,67 @@ class PreferencesWindow:
             if key == self.app.current_model:
                 model_popup.selectItemWithTitle_(f"{prefix}{info.name}")
         
-        card.addSubview_(model_popup)
+        model_card.addSubview_(model_popup)
+        vibrancy_view.addSubview_(model_card)
         
-        inner_y -= 45
+        y_pos -= model_card_height + 10
         
-        # Separator
-        sep = NSBox.alloc().initWithFrame_(NSMakeRect(15, inner_y + 10, card_width - 30, 1))
-        sep.setBoxType_(2)
-        card.addSubview_(sep)
+        # --- Hotkey Card ---
+        hotkey_card_height = 58
+        hotkey_card = self._create_card(card_margin, y_pos - hotkey_card_height, card_width, hotkey_card_height)
         
-        inner_y -= 10
+        hotkey_label = NSTextField.alloc().initWithFrame_(NSMakeRect(14, hotkey_card_height - 38, 70, 18))
+        hotkey_label.setStringValue_("Hotkey")
+        hotkey_label.setFont_(NSFont.systemFontOfSize_(13))
+        hotkey_label.setTextColor_(NSColor.labelColor())
+        hotkey_label.setBezeled_(False)
+        hotkey_label.setDrawsBackground_(False)
+        hotkey_label.setEditable_(False)
+        hotkey_card.addSubview_(hotkey_label)
         
-        # Cleanup toggle row
-        cleanup_label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, inner_y, 120, 20))
-        cleanup_label.setStringValue_("AI Formatting")
-        cleanup_label.setFont_(NSFont.systemFontOfSize_(13))
-        cleanup_label.setTextColor_(NSColor.labelColor())
-        cleanup_label.setBezeled_(False)
-        cleanup_label.setDrawsBackground_(False)
-        cleanup_label.setEditable_(False)
-        card.addSubview_(cleanup_label)
+        from .hotkey import HotkeyManager
         
-        cleanup_btn = NSButton.alloc().initWithFrame_(NSMakeRect(card_width - 65, inner_y - 2, 50, 24))
+        hotkey_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(90, hotkey_card_height - 40, card_width - 110, 26))
+        hotkey_popup.removeAllItems()
+        
+        current_key = self.app.hotkey_manager.trigger_key_name if self.app.hotkey_manager else 'cmd_r'
+        
+        for key_name, display in HotkeyManager.KEY_DISPLAY.items():
+            hotkey_popup.addItemWithTitle_(display)
+            if key_name == current_key:
+                hotkey_popup.selectItemWithTitle_(display)
+        
+        # Create callback for hotkey change
+        def on_hotkey_change(sender):
+            selected = sender.titleOfSelectedItem()
+            # Find the key name
+            for key_name, display in HotkeyManager.KEY_DISPLAY.items():
+                if display == selected:
+                    if self.app.hotkey_manager:
+                        self.app.hotkey_manager.set_trigger_key(key_name)
+                    break
+        
+        hotkey_popup.setTarget_(hotkey_popup)
+        hotkey_popup.setAction_(objc.selector(on_hotkey_change, signature=b'v@:@'))
+        hotkey_card.addSubview_(hotkey_popup)
+        vibrancy_view.addSubview_(hotkey_card)
+        
+        y_pos -= hotkey_card_height + 10
+        
+        # --- Formatting Card ---
+        format_card_height = 58
+        format_card = self._create_card(card_margin, y_pos - format_card_height, card_width, format_card_height)
+        
+        format_label = NSTextField.alloc().initWithFrame_(NSMakeRect(14, format_card_height - 38, 140, 18))
+        format_label.setStringValue_("AI Formatting")
+        format_label.setFont_(NSFont.systemFontOfSize_(13))
+        format_label.setTextColor_(NSColor.labelColor())
+        format_label.setBezeled_(False)
+        format_label.setDrawsBackground_(False)
+        format_label.setEditable_(False)
+        format_card.addSubview_(format_label)
+        
+        cleanup_btn = NSButton.alloc().initWithFrame_(NSMakeRect(card_width - 60, format_card_height - 40, 50, 26))
         cleanup_btn.setButtonType_(13)  # Switch style
         cleanup_btn.setTitle_("")
         cleanup_btn.setState_(NSOnState if self.app.cleanup_enabled else NSOffState)
@@ -189,43 +215,60 @@ class PreferencesWindow:
         
         cleanup_btn.setTarget_(cleanup_btn)
         cleanup_btn.setAction_(objc.selector(toggle_cleanup, signature=b'v@:@'))
-        card.addSubview_(cleanup_btn)
+        format_card.addSubview_(cleanup_btn)
+        vibrancy_view.addSubview_(format_card)
         
-        inner_y -= 45
+        y_pos -= format_card_height + 10
         
-        # Separator
-        sep2 = NSBox.alloc().initWithFrame_(NSMakeRect(15, inner_y + 10, card_width - 30, 1))
-        sep2.setBoxType_(2)
-        card.addSubview_(sep2)
+        # --- Shortcuts Info Card ---
+        shortcuts_card_height = 100
+        shortcuts_card = self._create_card(card_margin, y_pos - shortcuts_card_height, card_width, shortcuts_card_height)
         
-        inner_y -= 10
+        shortcuts_title = NSTextField.alloc().initWithFrame_(NSMakeRect(14, shortcuts_card_height - 28, 200, 18))
+        shortcuts_title.setStringValue_("Keyboard Shortcuts")
+        shortcuts_title.setFont_(NSFont.boldSystemFontOfSize_(12))
+        shortcuts_title.setTextColor_(NSColor.secondaryLabelColor())
+        shortcuts_title.setBezeled_(False)
+        shortcuts_title.setDrawsBackground_(False)
+        shortcuts_title.setEditable_(False)
+        shortcuts_card.addSubview_(shortcuts_title)
         
-        # Hotkey display row
-        hotkey_label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, inner_y, 80, 20))
-        hotkey_label.setStringValue_("Hotkey")
-        hotkey_label.setFont_(NSFont.systemFontOfSize_(13))
-        hotkey_label.setTextColor_(NSColor.labelColor())
-        hotkey_label.setBezeled_(False)
-        hotkey_label.setDrawsBackground_(False)
-        hotkey_label.setEditable_(False)
-        card.addSubview_(hotkey_label)
+        shortcuts_info = [
+            ("Hold hotkey", "Record & transcribe"),
+            ("Double-tap", "Paste last transcription"),
+            ("Triple-tap", "Undo (Cmd+Z)"),
+        ]
         
-        hotkey_value = NSTextField.alloc().initWithFrame_(NSMakeRect(100, inner_y, card_width - 120, 20))
-        hotkey_value.setStringValue_("Hold Right ⌘")
-        hotkey_value.setFont_(NSFont.systemFontOfSize_(13))
-        hotkey_value.setTextColor_(NSColor.secondaryLabelColor())
-        hotkey_value.setBezeled_(False)
-        hotkey_value.setDrawsBackground_(False)
-        hotkey_value.setEditable_(False)
-        hotkey_value.setAlignment_(2)  # Right align
-        card.addSubview_(hotkey_value)
+        row_y = shortcuts_card_height - 48
+        for action, desc in shortcuts_info:
+            action_label = NSTextField.alloc().initWithFrame_(NSMakeRect(14, row_y, 90, 16))
+            action_label.setStringValue_(action)
+            action_label.setFont_(NSFont.monospacedSystemFontOfSize_weight_(11, 0.4))
+            action_label.setTextColor_(NSColor.labelColor())
+            action_label.setBezeled_(False)
+            action_label.setDrawsBackground_(False)
+            action_label.setEditable_(False)
+            shortcuts_card.addSubview_(action_label)
+            
+            desc_label = NSTextField.alloc().initWithFrame_(NSMakeRect(110, row_y, card_width - 130, 16))
+            desc_label.setStringValue_(desc)
+            desc_label.setFont_(NSFont.systemFontOfSize_(11))
+            desc_label.setTextColor_(NSColor.secondaryLabelColor())
+            desc_label.setBezeled_(False)
+            desc_label.setDrawsBackground_(False)
+            desc_label.setEditable_(False)
+            shortcuts_card.addSubview_(desc_label)
+            
+            row_y -= 20
         
-        vibrancy_view.addSubview_(card)
+        vibrancy_view.addSubview_(shortcuts_card)
         
-        # === Footer text ===
-        footer_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 25, win_width, 16))
+        y_pos -= shortcuts_card_height + 10
+        
+        # === Footer ===
+        footer_label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 20, win_width, 14))
         footer_label.setStringValue_("Local AI • No data leaves your Mac")
-        footer_label.setFont_(NSFont.systemFontOfSize_(11))
+        footer_label.setFont_(NSFont.systemFontOfSize_(10))
         footer_label.setTextColor_(NSColor.tertiaryLabelColor())
         footer_label.setBezeled_(False)
         footer_label.setDrawsBackground_(False)
@@ -238,6 +281,22 @@ class PreferencesWindow:
         NSApp.activateIgnoringOtherApps_(True)
         
         log.info("Preferences window opened")
+    
+    def _create_card(self, x, y, width, height):
+        """Create a styled card view with vibrancy."""
+        from AppKit import NSVisualEffectView, NSVisualEffectStateActive, NSColor, NSMakeRect
+        
+        card = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(x, y, width, height))
+        card.setMaterial_(3)  # NSVisualEffectMaterialLight
+        card.setBlendingMode_(0)  # NSVisualEffectBlendingModeWithinWindow
+        card.setState_(NSVisualEffectStateActive)
+        card.setWantsLayer_(True)
+        card.layer().setCornerRadius_(10)
+        card.layer().setMasksToBounds_(True)
+        card.layer().setBorderWidth_(0.5)
+        card.layer().setBorderColor_(NSColor.separatorColor().CGColor())
+        
+        return card
 
 
 def show_preferences(app_instance):

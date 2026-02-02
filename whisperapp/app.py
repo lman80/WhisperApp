@@ -13,7 +13,7 @@ from .database import Database
 from .recorder import AudioRecorder
 from .transcribe import transcribe
 from .cleanup import TextCleaner
-from .hotkey import HotkeyManager, Key
+from .hotkey import HotkeyManager
 from .sounds import play_start_sound, play_stop_sound
 from .indicator import show_indicator, hide_indicator, update_indicator_level
 
@@ -193,9 +193,10 @@ class WhisperApp(rumps.App):
     def _start_hotkey_listener(self):
         """Initialize and start the global hotkey listener."""
         self.hotkey_manager = HotkeyManager(
-            trigger_key=Key.cmd_r,
             on_start=self._on_recording_start,
-            on_stop=self._on_recording_stop
+            on_stop=self._on_recording_stop,
+            on_double_tap=self._on_double_tap,
+            on_triple_tap=self._on_triple_tap
         )
         self.hotkey_manager.start_listening_async()
     
@@ -299,6 +300,9 @@ class WhisperApp(rumps.App):
             )
             log.debug("Saved to database")
             
+            # Store for double-tap paste
+            self.hotkey_manager.store_last_transcription(cleaned_text)
+            
             # Inject text into active application
             log.info(f"Injecting text: '{cleaned_text}'")
             self.hotkey_manager.inject_text(cleaned_text)
@@ -324,10 +328,26 @@ class WhisperApp(rumps.App):
         except Exception as e:
             log.error(f"Error processing recording: {e}", exc_info=True)
             self._update_status(f"Error: {str(e)[:20]}", "⚠️")
+            hide_indicator()
+            set_processing_mode(False)
         finally:
             self.is_processing = False
     
-    # toggle_cleanup removed - using cleanup mode submenu instead
+    def _on_double_tap(self):
+        """Called on double-tap - paste last transcription."""
+        log.info("🔄 Double-tap detected - pasting last transcription")
+        if self.hotkey_manager:
+            self.hotkey_manager.paste_last_transcription()
+            self._update_status("Pasted last", "📋")
+            threading.Timer(1.5, lambda: self._update_status("Ready", "🎤")).start()
+    
+    def _on_triple_tap(self):
+        """Called on triple-tap - undo last paste."""
+        log.info("↩️ Triple-tap detected - undo")
+        if self.hotkey_manager:
+            self.hotkey_manager.undo_last_paste()
+            self._update_status("Undo", "↩️")
+            threading.Timer(1.5, lambda: self._update_status("Ready", "🎤")).start()
     
     @rumps.clicked("History")
     def show_history(self, _):
