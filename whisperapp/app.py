@@ -355,9 +355,7 @@ class WhisperApp(rumps.App):
             self.db.save_transcription(
                 text=cleaned_text,
                 raw_text=raw_text,
-                duration=duration,
-                model=self.current_model,
-                cleanup_used=self.cleanup_enabled
+                duration=duration
             )
             log.debug("Saved to database")
             
