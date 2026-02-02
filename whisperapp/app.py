@@ -37,10 +37,17 @@ class WhisperApp(rumps.App):
     
     def __init__(self):
         log.info("Initializing WhisperApp...")
+        
+        # Find menu bar icon
+        from pathlib import Path
+        assets_dir = Path(__file__).parent / "assets"
+        icon_path = assets_dir / "MenuBarIcon.png"
+        icon = str(icon_path) if icon_path.exists() else None
+        
         super().__init__(
             name="WhisperApp",
-            icon=None,  # Will use text icon if no icon file
-            title="🎤",
+            icon=icon,
+            title=None if icon else "🎤",  # Use icon OR text, not both
             quit_button="Quit WhisperApp"
         )
         
@@ -352,21 +359,9 @@ Words Typed: {stats['today_words']:,}"""
     
     @rumps.clicked("Settings")
     def show_settings(self, _):
-        """Show settings dialog."""
-        cleanup_status = "ON" if self.cleanup_enabled else "OFF"
-        message = f"""⚙️ Settings
-
-Push-to-Talk Key: Right ⌘ (hold to record)
-Cleanup: {cleanup_status}
-Database: ~/.whisperapp/history.db
-
-Click 'Cleanup: ON/OFF' in menu to toggle."""
-        
-        rumps.alert(
-            title="WhisperApp Settings",
-            message=message,
-            ok="OK"
-        )
+        """Show the preferences window."""
+        from .preferences import show_preferences
+        show_preferences(self)
 
 
 def main():
