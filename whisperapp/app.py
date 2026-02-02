@@ -195,6 +195,7 @@ class WhisperApp(rumps.App):
         self.hotkey_manager = HotkeyManager(
             on_start=self._on_recording_start,
             on_stop=self._on_recording_stop,
+            on_cancel=self._on_recording_cancel,
             on_double_tap=self._on_double_tap,
             on_triple_tap=self._on_triple_tap
         )
@@ -246,6 +247,18 @@ class WhisperApp(rumps.App):
             self._update_status("Microphone error", "⚠️")
             self.is_recording = False
             hide_indicator()
+    
+    def _on_recording_cancel(self):
+        """Called when a quick tap is detected - cancel the recording."""
+        log.info("❌ Quick tap detected - cancelling recording")
+        if self.is_recording:
+            try:
+                self.recorder.stop()
+            except:
+                pass
+            self.is_recording = False
+            hide_indicator()
+            self._update_status("Ready", "🎤")
     
     def _on_recording_stop(self):
         """Called when the push-to-talk key is released."""

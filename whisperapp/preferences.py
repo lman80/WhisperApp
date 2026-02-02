@@ -16,6 +16,8 @@ class PreferencesWindow:
     def __init__(self, app_instance):
         self.app = app_instance
         self.window = None
+        self.hotkey_button = None
+        self.is_recording_hotkey = False
     
     def show(self):
         """Show the preferences window."""
@@ -35,7 +37,8 @@ class PreferencesWindow:
             NSPopUpButton, NSFont, NSColor, NSApp, NSBox,
             NSImage, NSImageView, NSOnState, NSOffState,
             NSVisualEffectView, NSVisualEffectBlendingModeBehindWindow,
-            NSVisualEffectMaterialHUDWindow, NSVisualEffectStateActive
+            NSVisualEffectMaterialHUDWindow, NSVisualEffectStateActive,
+            NSBezelStyleRounded
         )
         import objc
         
@@ -165,29 +168,30 @@ class PreferencesWindow:
         
         from .hotkey import HotkeyManager
         
-        hotkey_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(90, hotkey_card_height - 40, card_width - 110, 26))
-        hotkey_popup.removeAllItems()
+        # Get current hotkey display
+        current_display = self.app.hotkey_manager.get_trigger_key_display() if self.app.hotkey_manager else "Right ⌘"
         
-        current_key = self.app.hotkey_manager.trigger_key_name if self.app.hotkey_manager else 'cmd_r'
+        # Record Hotkey button
+        self.hotkey_button = NSButton.alloc().initWithFrame_(NSMakeRect(90, hotkey_card_height - 40, card_width - 110, 26))
+        self.hotkey_button.setTitle_(current_display)
+        self.hotkey_button.setBezelStyle_(NSBezelStyleRounded)
         
-        for key_name, display in HotkeyManager.KEY_DISPLAY.items():
-            hotkey_popup.addItemWithTitle_(display)
-            if key_name == current_key:
-                hotkey_popup.selectItemWithTitle_(display)
+        def on_record_hotkey(sender):
+            if not self.is_recording_hotkey:
+                self.is_recording_hotkey = True
+                sender.setTitle_("Press a key...")
+                
+                def on_key_recorded(key_name):
+                    display = HotkeyManager.KEY_DISPLAY.get(key_name, key_name)
+                    sender.setTitle_(display)
+                    self.is_recording_hotkey = False
+                
+                if self.app.hotkey_manager:
+                    self.app.hotkey_manager.start_hotkey_recording(on_key_recorded)
         
-        # Create callback for hotkey change
-        def on_hotkey_change(sender):
-            selected = sender.titleOfSelectedItem()
-            # Find the key name
-            for key_name, display in HotkeyManager.KEY_DISPLAY.items():
-                if display == selected:
-                    if self.app.hotkey_manager:
-                        self.app.hotkey_manager.set_trigger_key(key_name)
-                    break
-        
-        hotkey_popup.setTarget_(hotkey_popup)
-        hotkey_popup.setAction_(objc.selector(on_hotkey_change, signature=b'v@:@'))
-        hotkey_card.addSubview_(hotkey_popup)
+        self.hotkey_button.setTarget_(self.hotkey_button)
+        self.hotkey_button.setAction_(objc.selector(on_record_hotkey, signature=b'v@:@'))
+        hotkey_card.addSubview_(self.hotkey_button)
         vibrancy_view.addSubview_(hotkey_card)
         
         y_pos -= hotkey_card_height + 10

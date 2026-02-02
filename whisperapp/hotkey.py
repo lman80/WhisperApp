@@ -4,7 +4,7 @@ import threading
 import time
 import json
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 import logging
 
 from pynput import keyboard
@@ -25,6 +25,7 @@ class HotkeyManager:
     - Hold trigger key to record
     - Double-tap to paste last transcription
     - Triple-tap to undo (select all + delete)
+    - Record custom hotkey
     """
     
     # Mapping of key names to pynput Key objects
@@ -53,11 +54,14 @@ class HotkeyManager:
         'caps_lock': '⇪ Caps Lock',
     }
     
+    # Reverse map: Key -> name
+    KEY_TO_NAME = {v: k for k, v in KEY_MAP.items()}
+    
     def __init__(
         self,
-        trigger_key: Key = Key.cmd_r,
         on_start: Optional[Callable] = None,
         on_stop: Optional[Callable] = None,
+        on_cancel: Optional[Callable] = None,
         on_double_tap: Optional[Callable] = None,
         on_triple_tap: Optional[Callable] = None
     ):
@@ -65,16 +69,17 @@ class HotkeyManager:
         Initialize the hotkey manager.
         
         Args:
-            trigger_key: The key to use as push-to-talk trigger
             on_start: Callback when key is pressed (start recording)
-            on_stop: Callback when key is released (stop recording)
+            on_stop: Callback when key is released after holding (stop recording)
+            on_cancel: Callback when recording should be cancelled (quick tap)
             on_double_tap: Callback for double-tap (paste last transcription)
             on_triple_tap: Callback for triple-tap (undo)
         """
-        self.trigger_key = trigger_key
-        self.trigger_key_name = 'cmd_r'  # Track name for config
+        self.trigger_key = Key.cmd_r
+        self.trigger_key_name = 'cmd_r'
         self.on_start = on_start
         self.on_stop = on_stop
+        self.on_cancel = on_cancel
         self.on_double_tap = on_double_tap
         self.on_triple_tap = on_triple_tap
         
@@ -88,10 +93,14 @@ class HotkeyManager:
         self.tap_threshold = 0.35  # Max time between taps (seconds)
         self.hold_threshold = 0.25  # Min hold time for recording (seconds)
         self.press_start_time = 0
-        self.was_held = False
+        self.recording_started = False
         
         # Last transcription for double-tap paste
         self.last_transcription = ""
+        
+        # Hotkey recording mode
+        self.is_recording_hotkey = False
+        self.hotkey_record_callback: Optional[Callable[[str], None]] = None
         
         # Load config
         self._load_config()
@@ -129,7 +138,7 @@ class HotkeyManager:
         except Exception as e:
             log.error(f"Could not save config: {e}")
     
-    def set_trigger_key(self, key_name: str):
+    def set_trigger_key(self, key_name: str) -> bool:
         """Change the trigger key."""
         if key_name in self.KEY_MAP:
             self.trigger_key = self.KEY_MAP[key_name]
@@ -143,16 +152,41 @@ class HotkeyManager:
         """Get display name for current trigger key."""
         return self.KEY_DISPLAY.get(self.trigger_key_name, self.trigger_key_name)
     
+    def start_hotkey_recording(self, callback: Callable[[str], None]):
+        """Start listening for a new hotkey. Callback receives the key name."""
+        log.info("Started hotkey recording mode")
+        self.is_recording_hotkey = True
+        self.hotkey_record_callback = callback
+    
+    def stop_hotkey_recording(self):
+        """Stop hotkey recording mode."""
+        self.is_recording_hotkey = False
+        self.hotkey_record_callback = None
+    
     def _on_press(self, key):
         """Handle key press events."""
         try:
+            # Hotkey recording mode - capture any modifier key press
+            if self.is_recording_hotkey:
+                key_name = self.KEY_TO_NAME.get(key)
+                if key_name:
+                    log.info(f"Recorded new hotkey: {key_name}")
+                    self.set_trigger_key(key_name)
+                    self.is_recording_hotkey = False
+                    if self.hotkey_record_callback:
+                        self.hotkey_record_callback(key_name)
+                        self.hotkey_record_callback = None
+                return
+            
+            # Normal mode - detect trigger key press
             if key == self.trigger_key and not self.is_pressed:
                 self.is_pressed = True
                 self.press_start_time = time.time()
-                self.was_held = False
+                self.recording_started = False
                 
                 # Start recording immediately
                 if self.on_start:
+                    self.recording_started = True
                     threading.Thread(target=self.on_start, daemon=True).start()
         except Exception as e:
             log.error(f"Error in key press handler: {e}")
@@ -160,6 +194,10 @@ class HotkeyManager:
     def _on_release(self, key):
         """Handle key release events with tap detection."""
         try:
+            # Skip if in hotkey recording mode
+            if self.is_recording_hotkey:
+                return
+            
             if key == self.trigger_key and self.is_pressed:
                 self.is_pressed = False
                 press_duration = time.time() - self.press_start_time
@@ -168,13 +206,16 @@ class HotkeyManager:
                 # Was this a hold (for recording) or a tap?
                 if press_duration >= self.hold_threshold:
                     # This was a hold - trigger recording stop
-                    self.was_held = True
                     self.tap_times = []  # Reset tap counter
                     if self.on_stop:
                         threading.Thread(target=self.on_stop, daemon=True).start()
                 else:
-                    # This was a quick tap - cancel the recording that just started
-                    # We need to track this as a tap for double/triple tap detection
+                    # This was a quick tap - cancel the recording that started
+                    if self.recording_started and self.on_cancel:
+                        threading.Thread(target=self.on_cancel, daemon=True).start()
+                    self.recording_started = False
+                    
+                    # Track tap for double/triple detection
                     self.tap_times.append(current_time)
                     
                     # Filter out old taps
@@ -215,7 +256,7 @@ class HotkeyManager:
             log.info("No previous transcription to paste")
     
     def undo_last_paste(self):
-        """Undo by selecting all and deleting (Cmd+Z)."""
+        """Undo by executing Cmd+Z."""
         try:
             log.info("Executing undo (Cmd+Z)")
             self.keyboard_controller.press(Key.cmd)
