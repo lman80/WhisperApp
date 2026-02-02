@@ -2,9 +2,12 @@
 
 import tempfile
 import threading
+import time
 from typing import Optional, Callable
 
 import numpy as np
+from scipy.io import wavfile
+import sounddevice as sd
 
 
 class AudioRecorder:
@@ -52,8 +55,6 @@ class AudioRecorder:
     
     def start(self) -> None:
         """Start recording audio from the microphone."""
-        import sounddevice as sd
-        import time
         
         with self._lock:
             self.frames = []
@@ -74,7 +75,6 @@ class AudioRecorder:
     
     def _find_real_microphone(self):
         """Find a real microphone device, avoiding virtual audio devices."""
-        import sounddevice as sd
         
         # Virtual audio devices to avoid
         virtual_devices = ['blackhole', 'soundflower', 'loopback', 'virtual']
@@ -107,8 +107,6 @@ class AudioRecorder:
         Returns:
             Path to the saved WAV file
         """
-        import time
-        from scipy.io import wavfile
         
         with self._lock:
             self.recording = False
