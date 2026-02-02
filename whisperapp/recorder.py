@@ -56,6 +56,15 @@ class AudioRecorder:
     def start(self) -> None:
         """Start recording audio from the microphone."""
         
+        # Clean up any existing stream first to prevent resource leaks
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except:
+                pass
+            self.stream = None
+        
         with self._lock:
             self.frames = []
             self.recording = True
@@ -64,14 +73,19 @@ class AudioRecorder:
         # Find a real microphone (avoid virtual devices like BlackHole)
         device = self._find_real_microphone()
         
-        self.stream = sd.InputStream(
-            device=device,
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype='float32',
-            callback=self._audio_callback
-        )
-        self.stream.start()
+        try:
+            self.stream = sd.InputStream(
+                device=device,
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype='float32',
+                callback=self._audio_callback
+            )
+            self.stream.start()
+        except Exception as e:
+            self.recording = False
+            self.stream = None
+            raise
     
     def _find_real_microphone(self):
         """Find a real microphone device, avoiding virtual audio devices."""
@@ -112,9 +126,13 @@ class AudioRecorder:
             self.recording = False
             duration = time.time() - self._start_time if self._start_time else 0
         
+        # Safely close stream
         if self.stream:
-            self.stream.stop()
-            self.stream.close()
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
             self.stream = None
         
         # Concatenate all recorded frames
@@ -134,6 +152,21 @@ class AudioRecorder:
         self._last_duration = duration
         
         return wav_path
+    
+    def cancel(self) -> None:
+        """Cancel recording without saving - for quick taps."""
+        with self._lock:
+            self.recording = False
+            self.frames = []
+        
+        # Safely close stream
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
     
     @property
     def last_duration(self) -> float:

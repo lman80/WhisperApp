@@ -269,7 +269,7 @@ class WhisperApp(rumps.App):
         with self._recording_lock:
             if self.is_recording:
                 try:
-                    self.recorder.stop()
+                    self.recorder.cancel()  # Use cancel() for quick taps - cleans up without saving
                 except:
                     pass
                 self.is_recording = False
